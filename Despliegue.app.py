@@ -4,13 +4,12 @@ import joblib
 import numpy as np
 
 # ==========================================
-# 1. CONFIGURACIÓN Y CARGA DE MODELOS
+# 1. CARGA DE RECURSOS
 # ==========================================
-st.set_page_config(page_title="Credit Score Predictor", layout="wide")
+st.set_page_config(page_title="Credit Risk Predictor", layout="wide")
 
 @st.cache_resource
 def cargar_recursos():
-    # Cargamos todos los objetos joblib
     modelo = joblib.load('modelo_red_neuronal1.joblib')
     scaler = joblib.load('scaler_model.joblib')
     ohe = joblib.load('ohe_model.joblib')
@@ -21,87 +20,80 @@ def cargar_recursos():
 try:
     modelo, scaler, ohe, pca, le = cargar_recursos()
 except Exception as e:
-    st.error(f"Error al cargar los archivos .joblib: {e}")
+    st.error(f"Error al cargar archivos: {e}")
 
 # ==========================================
-# 2. INTERFAZ DE USUARIO
+# 2. INTERFAZ
 # ==========================================
 st.title("🚀 Clasificación de Riesgo Crediticio")
-st.markdown("Introduce los datos del cliente para evaluar el riesgo.")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    age = st.number_input("Edad", min_value=18, max_value=100, value=30)
-    duration = st.number_input("Duración del Crédito (meses)", min_value=1, max_value=72, value=12)
-    amount = st.number_input("Monto del Crédito", min_value=100, max_value=20000, value=1000)
-    job = st.selectbox("Nivel de Trabajo (0 a 3)", [0, 1, 2, 3])
+    age = st.number_input("Age", 18, 100, 30)
+    duration = st.number_input("Duration", 1, 72, 12)
+    amount = st.number_input("Credit amount", 100, 20000, 1000)
+    job = st.selectbox("Job", [0, 1, 2, 3])
 
 with col2:
-    sex = st.selectbox("Sexo", ["male", "female"])
-    housing = st.selectbox("Vivienda", ["own", "rent", "free"])
-    saving = st.selectbox("Cuentas de Ahorro", ["little", "moderate", "quite rich", "rich"])
-    checking = st.selectbox("Cuenta Corriente", ["little", "moderate", "rich"])
-    purpose = st.selectbox("Propósito del Crédito", ["radio/TV", "education", "furniture/equipment", "car", "business", "domestic appliances", "repairs", "vacation/others"])
+    sex = st.selectbox("Sex", ["male", "female"])
+    housing = st.selectbox("Housing", ["own", "rent", "free"])
+    saving = st.selectbox("Saving accounts", ["little", "moderate", "quite rich", "rich"])
+    checking = st.selectbox("Checking account", ["little", "moderate", "rich"])
+    purpose = st.selectbox("Purpose", ["radio/TV", "education", "furniture/equipment", "car", "business", "domestic appliances", "repairs", "others"])
 
 # ==========================================
-# 3. PROCESAMIENTO DE DATOS (PIPELINE)
+# 3. PROCESAMIENTO (CORREGIDO)
 # ==========================================
 if st.button("Evaluar Crédito"):
     try:
-        # A. Crear DataFrame inicial (Orden no importa aquí aún)
-        input_dict = {
-            'Age': age, 
+        # 1. Crear el DataFrame inicial respetando los nombres exactos del entrenamiento
+        input_df = pd.DataFrame([{
+            'Age': age,
             'Sex': sex,
             'Job': job,
-            'Housing': housing, 
-            'Saving accounts': saving, 
-            'Checking account': checking, 
-            'Credit amount': amount, 
-            'Duration': duration, 
+            'Housing': housing,
+            'Saving accounts': saving,
+            'Checking account': checking,
+            'Credit amount': amount,
+            'Duration': duration,
             'Purpose': purpose
-        }
-        input_df = pd.DataFrame([input_dict])
+        }])
 
-        # B. Aplicar OneHotEncoding
-        # IMPORTANTE: El OHE solo debe recibir las columnas nominales en su orden original
-        nominal_cols = ['Sex', 'Housing', 'Saving accounts', 'Checking account', 'Purpose']
+        # 2. PROCESAR CATEGÓRICAS (OHE)
+        # Obtenemos las columnas que el OHE espera (esto evita el error de nombres)
+        cols_ohe_esperadas = ohe.feature_names_in_
+        df_nominal = input_df[cols_ohe_esperadas]
         
-        # Forzamos que el DataFrame que entra al OHE tenga solo estas columnas
-        df_nominal = input_df[nominal_cols]
         ohe_encoded = ohe.transform(df_nominal)
+        ohe_df = pd.DataFrame(ohe_encoded, columns=ohe.get_feature_names_out(cols_ohe_esperadas), index=input_df.index)
+
+        # 3. PROCESAR NUMÉRICAS (SCALER)
+        # Escalamos solo las columnas que el Scaler conoce
+        cols_scaler_esperadas = scaler.feature_names_in_
+        df_numericas = input_df[cols_scaler_esperadas].copy()
+        df_numericas[cols_scaler_esperadas] = scaler.transform(df_numericas)
+
+        # 4. CONCATENAR Y REORDENAR PARA PCA
+        # El PCA espera una estructura específica (Numéricas escaladas + Dummies)
+        df_completo = pd.concat([df_numericas, ohe_df], axis=1)
         
-        # Crear DataFrame de las dummies
-        ohe_df = pd.DataFrame(ohe_encoded, columns=ohe.get_feature_names_out(nominal_cols), index=input_df.index)
-
-        # C. Combinar con numéricas
-        num_cols = ['Age', 'Credit amount', 'Duration', 'Job']
-        df_final_pre_scale = pd.concat([input_df[num_cols], ohe_df], axis=1)
-
-        # D. Escalado (StandardScaler)
-        # El scaler espera solo las 4 numéricas. Las escalamos en el DataFrame final.
-        df_final_pre_scale[num_cols] = scaler.transform(df_final_pre_scale[num_cols])
-
-        # E. PCA (Paso Crítico)
-        # El PCA espera TODAS las columnas (numéricas + dummies) en el orden exacto del entrenamiento
-        columnas_pca = pca.feature_names_in_
-        df_reordenado = df_final_pre_scale[columnas_pca]
+        # FORZAMOS el orden de columnas exacto que pide el PCA
+        cols_pca_esperadas = pca.feature_names_in_
+        df_para_pca = df_completo[cols_pca_esperadas]
         
-        datos_pca = pca.transform(df_reordenado)
+        # 5. TRANSFORMACIÓN FINAL Y PREDICCIÓN
+        datos_pca = pca.transform(df_para_pca)
+        prediccion = modelo.predict(datos_pca)
+        resultado = le.inverse_transform(prediccion)[0]
 
-        # F. Predicción
-        prediccion_num = modelo.predict(datos_pca)
-        resultado = le.inverse_transform(prediccion_num)[0]
-
-        # ==========================================
-        # 4. MOSTRAR RESULTADO
-        # ==========================================
+        # RESULTADO
         st.divider()
         if resultado == 'good':
-            st.success(f"### Resultado: El cliente es APTO ✅ (Riesgo: {resultado.upper()})")
+            st.success(f"### RESULTADO: {resultado.upper()} ✅")
         else:
-            st.error(f"### Resultado: El cliente es de ALTO RIESGO ❌ (Riesgo: {resultado.upper()})")
-            
+            st.error(f"### RESULTADO: {resultado.upper()} ❌")
+
     except Exception as e:
         st.error(f"Error técnico: {e}")
-        st.warning("Revisa que los nombres de las columnas en el código coincidan con tu dataset original.")
+        st.info("Revisa si los nombres de las columnas en el código coinciden con tu notebook original.")
