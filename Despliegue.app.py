@@ -2,158 +2,154 @@ import streamlit as st
 import pandas as pd
 import joblib
 import numpy as np
+import plotly.express as px  # Librería para gráficos interactivos
 
 # ==========================================
-# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
+# 1. CONFIGURACIÓN Y ESTILOS
 # ==========================================
-st.set_page_config(
-    page_title="Credit Risk AI Analyzer",
-    page_icon="💰",
-    layout="wide"
-)
+st.set_page_config(page_title="Credit Risk AI Real-Time", page_icon="📊", layout="wide")
 
-# Estilo CSS personalizado para mejorar la estética
 st.markdown("""
     <style>
-    .main {
-        background-color: #f5f7f9;
-    }
-    .stButton>button {
-        width: 100%;
+    .metric-container {
+        background-color: #ffffff;
+        padding: 15px;
         border-radius: 10px;
-        height: 3em;
-        background-color: #007bff;
-        color: white;
-        font-weight: bold;
-    }
-    .result-card {
-        padding: 20px;
-        border-radius: 15px;
-        text-align: center;
-        margin-top: 20px;
+        border-left: 5px solid #007bff;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
     }
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. CARGA DE RECURSOS (MODELOS)
+# 2. CARGA DE MODELOS
 # ==========================================
 @st.cache_resource
 def cargar_recursos():
-    try:
-        modelo = joblib.load('modelo_red_neuronal1.joblib')
-        scaler = joblib.load('scaler_model.joblib')
-        ohe = joblib.load('ohe_model.joblib')
-        pca = joblib.load('pca_model.joblib')
-        le = joblib.load('le_model.joblib')
-        return modelo, scaler, ohe, pca, le
-    except Exception as e:
-        st.error(f"Error cargando archivos del modelo: {e}")
-        return None, None, None, None, None
+    modelo = joblib.load('modelo_red_neuronal1.joblib')
+    scaler = joblib.load('scaler_model.joblib')
+    ohe = joblib.load('ohe_model.joblib')
+    pca = joblib.load('pca_model.joblib')
+    le = joblib.load('le_model.joblib')
+    return modelo, scaler, ohe, pca, le
 
 modelo, scaler, ohe, pca, le = cargar_recursos()
 
+# Inicializar historial en la sesión si no existe
+if 'historial' not in st.session_state:
+    st.session_state.historial = pd.DataFrame()
+
 # ==========================================
-# 3. FUNCIÓN DE PROCESAMIENTO (LÓGICA CENTRAL)
+# 3. LÓGICA DE PREDICCIÓN
 # ==========================================
-def predecir_riesgo(df_input):
+def procesar_y_predecir(df_input):
     try:
-        # Asegurar nombres de columnas exactos
         nominal_cols = list(ohe.feature_names_in_)
         num_cols = list(scaler.feature_names_in_)
         
-        # OHE
-        ohe_encoded = ohe.transform(df_input[nominal_cols])
-        ohe_df = pd.DataFrame(ohe_encoded, columns=ohe.get_feature_names_out(nominal_cols), index=df_input.index)
-        
-        # Scaler
+        # OHE y Escalado
+        ohe_df = pd.DataFrame(ohe.transform(df_input[nominal_cols]), 
+                              columns=ohe.get_feature_names_out(nominal_cols), index=df_input.index)
         df_num = df_input[num_cols].copy()
         df_num[num_cols] = scaler.transform(df_num)
         
-        # Unión y Reordenamiento para PCA
-        df_full = pd.concat([df_num, ohe_df], axis=1)
-        df_final = df_full[list(pca.feature_names_in_)]
-        
-        # Predicción
-        datos_pca = pca.transform(df_final)
-        preds = modelo.predict(datos_pca)
+        # PCA y Predicción
+        df_final = pd.concat([df_num, ohe_df], axis=1)[list(pca.feature_names_in_)]
+        preds = modelo.predict(pca.transform(df_final))
         return le.inverse_transform(preds)
     except Exception as e:
-        st.error(f"Error en el procesamiento: {e}")
+        st.error(f"Error técnico: {e}")
         return None
 
 # ==========================================
-# 4. INTERFAZ DE USUARIO
+# 4. INTERFAZ PRINCIPAL
 # ==========================================
-st.title("🏦 Sistema Inteligente de Riesgo Crediticio")
-st.markdown("---")
+st.title("🏦 Panel de Control de Riesgo Crediticio")
+st.markdown("Análisis de datos en tiempo real con Inteligencia Artificial")
 
-tab1, tab2 = st.tabs(["📝 Formulario Individual", "📂 Carga Masiva (CSV)"])
+# Sidebar para entradas rápidas o configuración
+with st.sidebar:
+    st.header("⚙️ Configuración")
+    if st.button("Limpiar Historial"):
+        st.session_state.historial = pd.DataFrame()
+        st.rerun()
 
-# --- TAB 1: FORMULARIO INDIVIDUAL ---
+# Tabs principales
+tab1, tab2, tab3 = st.tabs(["📝 Nueva Evaluación", "📈 Dashboard Real-Time", "📂 Carga masiva"])
+
 with tab1:
-    with st.container():
-        st.subheader("Datos del Cliente")
-        c1, c2, c3 = st.columns(3)
-        
-        with c1:
-            age = st.number_input("Edad", 18, 100, 30)
-            sex = st.selectbox("Sexo", ["male", "female"])
-            job = st.selectbox("Nivel de Trabajo", [0, 1, 2, 3], help="0: No calificado, 3: Muy calificado")
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        with st.expander("Información Personal y Financiera", expanded=True):
+            c1, c2 = st.columns(2)
+            age = c1.slider("Edad", 18, 90, 30)
+            sex = c2.selectbox("Sexo", ["male", "female"])
+            job = c1.selectbox("Nivel Laboral", [0, 1, 2, 3])
+            housing = c2.selectbox("Vivienda", ["own", "rent", "free"])
             
-        with c2:
-            amount = st.number_input("Monto del Crédito", 100, 20000, 1000)
-            duration = st.number_input("Duración (meses)", 1, 72, 12)
-            purpose = st.selectbox("Propósito", ["radio/TV", "education", "furniture/equipment", "car", "business", "domestic appliances", "repairs", "vacation/others"])
-            
-        with c3:
-            housing = st.selectbox("Vivienda", ["own", "rent", "free"])
-            saving = st.selectbox("Cuentas de Ahorro", ["little", "moderate", "quite rich", "rich"])
-            checking = st.selectbox("Cuenta Corriente", ["little", "moderate", "rich"])
+            c3, c4 = st.columns(2)
+            amount = c3.number_input("Monto solicitado (USD)", 100, 20000, 1500)
+            duration = c4.number_input("Meses de plazo", 1, 72, 24)
+            purpose = st.selectbox("Propósito", ["radio/TV", "education", "furniture/equipment", "car", "business", "repairs", "vacation/others"])
+            saving = c3.selectbox("Ahorros", ["little", "moderate", "quite rich", "rich"])
+            checking = c4.selectbox("Cuenta corriente", ["little", "moderate", "rich"])
 
-    if st.button("🚀 ANALIZAR PERFIL"):
-        data = pd.DataFrame([{
+    if st.button("📊 REALIZAR PREDICCIÓN"):
+        nuevo_dato = pd.DataFrame([{
             'Age': age, 'Sex': sex, 'Job': job, 'Housing': housing, 
             'Saving accounts': saving, 'Checking account': checking, 
             'Credit amount': amount, 'Duration': duration, 'Purpose': purpose
         }])
         
-        resultado = predecir_riesgo(data)
-        
+        resultado = procesar_y_predecir(nuevo_dato)
         if resultado is not None:
-            res = resultado[0].upper()
-            if res == 'GOOD':
-                st.balloons()
-                st.markdown(f'<div class="result-card" style="background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb;">'
-                            f'<h2>✅ RIESGO BAJO</h2><p>El cliente es <b>APTO</b> para el crédito.</p></div>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="result-card" style="background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;">'
-                            f'<h2>❌ RIESGO ALTO</h2><p>El perfil presenta alta probabilidad de <b>INCUMPLIMIENTO</b>.</p></div>', unsafe_allow_html=True)
+            nuevo_dato['Resultado'] = resultado[0]
+            st.session_state.historial = pd.concat([st.session_state.historial, nuevo_dato], ignore_index=True)
+            
+            with col2:
+                if resultado[0] == 'good':
+                    st.success(f"### APTO ✅\nEl riesgo es BAJO.")
+                else:
+                    st.error(f"### NO APTO ❌\nEl riesgo es ALTO.")
+                st.info(f"Monto: ${amount} | Plazo: {duration} meses")
 
-# --- TAB 2: CARGA MASIVA ---
 with tab2:
-    st.subheader("Análisis de Cartera")
-    archivo = st.file_uploader("Sube tu archivo CSV con múltiples clientes", type=["csv"])
-    
+    if not st.session_state.historial.empty:
+        st.subheader("📊 Análisis de las Evaluaciones del Día")
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Evaluados", len(st.session_state.historial))
+        m2.metric("Aprobados", len(st.session_state.historial[st.session_state.historial['Resultado'] == 'good']))
+        m3.metric("Monto Promedio", f"${st.session_state.historial['Credit amount'].mean():.2f}")
+        
+        c1, c2 = st.columns(2)
+        # Gráfico de tarta de resultados
+        fig_pie = px.pie(st.session_state.historial, names='Resultado', title="Distribución de Aprobación",
+                         color='Resultado', color_discrete_map={'good':'#28a745', 'bad':'#dc3545'})
+        c1.plotly_chart(fig_pie, use_container_width=True)
+        
+        # Gráfico de dispersión Monto vs Edad
+        fig_scatter = px.scatter(st.session_state.historial, x="Age", y="Credit amount", color="Resultado",
+                                 title="Relación Edad vs Monto Solicitado", size="Duration")
+        c2.plotly_chart(fig_scatter, use_container_width=True)
+        
+        st.write("### 📄 Registro Detallado (Datos Reales)")
+        st.dataframe(st.session_state.historial, use_container_width=True)
+    else:
+        st.warning("Aún no hay datos para mostrar. Realiza una predicción en la primera pestaña.")
+
+with tab3:
+    archivo = st.file_uploader("Sube un CSV para análisis masivo", type=["csv"])
     if archivo:
         df_bulk = pd.read_csv(archivo)
-        st.write("Vista previa de los datos subidos:")
-        st.dataframe(df_bulk.head())
-        
-        if st.button("📊 PROCESAR ARCHIVO"):
-            resultados_masivos = predecir_riesgo(df_bulk)
-            if resultados_masivos is not None:
-                df_bulk['Resultado_Prediccion'] = resultados_masivos
-                
-                # Resumen visual
-                c1, c2 = st.columns(2)
-                resumen = df_bulk['Resultado_Prediccion'].value_counts()
-                c1.metric("Clientes Aptos", resumen.get('good', 0))
-                c2.metric("Clientes Riesgosos", resumen.get('bad', 0))
-                
-                st.success("¡Procesamiento completo!")
+        if st.button("Procesar Todo"):
+            res = procesar_y_predecir(df_bulk)
+            if res is not None:
+                df_bulk['Resultado'] = res
+                st.write("### Resultados del Archivo")
                 st.dataframe(df_bulk)
-                
-                # Botón de descarga
-                csv_download = df_bulk.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Descargar resultados analizados", data=csv_download, file_name="predicciones_credito.csv", mime="text/csv")
+                # Opción para añadir al historial general
+                if st.button("Sumar estos datos al Dashboard"):
+                    st.session_state.historial = pd.concat([st.session_state.historial, df_bulk], ignore_index=True)
+                    st.success("Dashboard actualizado.")
