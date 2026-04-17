@@ -65,7 +65,7 @@ def procesar_y_predecir(df_input):
 # 4. INTERFAZ PRINCIPAL
 # ==========================================
 st.title("🏦 Panel de Control de Riesgo Crediticio")
-st.markdown("Análisis de datos en tiempo real con Inteligencia Artificial")
+st.markdown("Análisis de datos en tiempo real")
 
 # Sidebar para entradas rápidas o configuración
 with st.sidebar:
